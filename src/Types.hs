@@ -8,7 +8,8 @@ import RIO.Process
 data Options = Options
   { optionsVerbose :: !Bool
   , optionsDebug :: !Bool
-  , targets :: [FilePath]
+  , optionsLanguage :: String
+  , optionsTargets :: [FilePath]
   }
 
 data App = App
