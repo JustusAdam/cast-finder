@@ -71,10 +71,10 @@ instance C.Preprocessor StripPP where
 
 type Cast = (C.CDecl, C.CExpr, C.NodeInfo)
 
-analyze :: (MonadIO m) => FilePath -> m [(Int, String)]
+analyze :: (MonadIO m) => FilePath -> m (Either String [(Int, String)])
 analyze file =
     liftIO $
-    map render . either (error . show) getCasts <$>
+    mapLeft show . fmap (map render . getCasts) <$>
     C.parseCFile pp Nothing opts file
   where
     pp = C.newGCC "gcc"

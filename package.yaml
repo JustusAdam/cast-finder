@@ -28,6 +28,8 @@ dependencies:
 - generic-lens
 - microlens
 - language-java
+- deepseq
+- unliftio
 
 ghc-options:
 - -Wall
