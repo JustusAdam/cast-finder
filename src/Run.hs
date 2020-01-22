@@ -29,66 +29,57 @@ langs :: String -> (String, FilePath -> RIO App (Either String [(Int, String)]))
 langs "java" = (".java", Java.analyze)
 langs "c" = (".c", C.analyze)
 langs l = error $ "Unsupported language: " ++ l
-
-reportMVarWait :: MonadUnliftIO m => String -> m a -> m a
-reportMVarWait msg =
-    try >=> \case
-        Left BlockedIndefinitelyOnMVar ->
-            error $ "Caught MVar exception on " ++ msg
-        Right res -> pure res
-
 run :: RIO App ()
 run = do
     logInfo "Scanning files"
     lang <- asks (optionsLanguage . appOptions)
     let (ext, analyze) = langs lang
     h <- asks appOutputHandle
-    void $
-        newChan >>= \fileQueue -> do
-            resultQueue <- newChan
-            ttravH <-
-                async $
-                asks (optionsTargets . appOptions) >>=
-                traverse (discover (isExtensionOf ext) fileQueue)
-            void $ wait ttravH
-            logDebug "File tree traversal ended"
-            cores <- liftIO getNumCapabilities
-            replicateM_ (cores * 2) $
-                async $
-                forever $ do
-                    file <- readChan fileQueue
-                    res <- analyze file
-                    logDebug $ "Analyzed: " <> fromString file
-                    res `deepseq` writeChan resultQueue (file, res)
-            logDebug "Workers spawned"
-            let go acc =
-                    try (readChan resultQueue) >>= \case
-                        Right (file, res) -> do
-                            x <-
-                                case res of
-                                    Left err -> do
-                                        logError $
-                                            "Parsing for " <> fromString file <>
-                                            " failed with:"
-                                        logError $ fromString err
-                                        pure Nothing
-                                    Right [] -> pure Nothing
-                                    Right locs -> do
-                                        liftIO $ do
-                                            hPrintf h "\n### %v ###\n" file
-                                            mapM_
-                                                (uncurry (hPrintf h "%i: %v\n"))
-                                                locs
-                                        let l = length locs
-                                        l `seq` pure (Just l)
-                            go (x : acc)
-                        Left BlockedIndefinitelyOnMVar ->
-                            liftIO $
-                            hPrintf
-                                h
-                                "\n\nAnalyzed %i files, found %i casts (%i errors)\n"
-                                (length acc)
-                                (sum $ catMaybes acc)
-                                (length $ filter isNothing acc)
-            go []
-            logDebug "Printer terminated"
+    newChan >>= \fileQueue -> do
+        resultQueue <- newChan
+        ttravH <-
+            async $
+            asks (optionsTargets . appOptions) >>=
+            traverse (discover (isExtensionOf ext) fileQueue)
+        cores <- liftIO getNumCapabilities
+        replicateM_ (cores * 2) $
+            async $
+            forever $ do
+                file <- readChan fileQueue
+                res <- analyze file
+                logDebug $ "Analyzed: " <> fromString file
+                res `deepseq` writeChan resultQueue (file, res)
+        logDebug "Workers spawned"
+        void $ wait ttravH
+        logDebug "File tree traversal ended"
+        let go acc =
+                try (readChan resultQueue) >>= \case
+                    Right (file, res) -> do
+                        x <-
+                            case res of
+                                Left err -> do
+                                    logError $
+                                        "Parsing for " <> fromString file <>
+                                        " failed with:"
+                                    logError $ fromString err
+                                    pure Nothing
+                                Right [] -> pure Nothing
+                                Right locs -> do
+                                    liftIO $ do
+                                        hPrintf h "\n### %v ###\n" file
+                                        mapM_
+                                            (uncurry (hPrintf h "%i: %v\n"))
+                                            locs
+                                    let l = length locs
+                                    l `seq` pure (Just l)
+                        go (x : acc)
+                    Left BlockedIndefinitelyOnMVar ->
+                        liftIO $
+                        hPrintf
+                            h
+                            "\n\nAnalyzed %i files, found %i casts (%i errors)\n"
+                            (length acc)
+                            (sum $ catMaybes acc)
+                            (length $ filter isNothing acc)
+        go []
+        logDebug "Printer terminated"
